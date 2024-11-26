@@ -13,9 +13,12 @@
 # limitations under the License.
 import os
 import time
-from tqdm import tqdm
+
+import torch
 from hyperpyyaml import load_hyperpyyaml
 from modelscope import snapshot_download
+from tqdm import tqdm
+
 from cosyvoice.cli.frontend import CosyVoiceFrontEnd
 from cosyvoice.cli.model import CosyVoiceModel
 from cosyvoice.utils.file_utils import logging
@@ -53,9 +56,18 @@ class CosyVoice:
         spks = list(self.frontend.spk2info.keys())
         return spks
 
-    def inference_sft(self, tts_text, spk_id, stream=False, speed=1.0):
+    def inference_sft(self, tts_text, spk_id, stream=False, speed=1.0, new_dropdown="无"):
         for i in tqdm(self.frontend.text_normalize(tts_text, split=True)):
             model_input = self.frontend.frontend_sft(i, spk_id)
+
+            # TODO 加入自定义音色
+            if new_dropdown != "无":
+                with open(f'./voices/{new_dropdown}.py','r',encoding='utf-8') as f:
+                    newspk = f.read()
+                    newspk = eval(newspk.replace("tensor","torch.tensor"))
+                model_input["flow_embedding"] = newspk["flow_embedding"]
+                model_input["llm_embedding"] = newspk["llm_embedding"]
+
             start_time = time.time()
             logging.info('synthesis text {}'.format(i))
             for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
@@ -70,6 +82,9 @@ class CosyVoice:
             if len(i) < 0.5 * len(prompt_text):
                 logging.warning('synthesis text {} too short than prompt text {}, this may lead to bad performance'.format(i, prompt_text))
             model_input = self.frontend.frontend_zero_shot(i, prompt_text, prompt_speech_16k)
+            
+            store_v(model_input)
+
             start_time = time.time()
             logging.info('synthesis text {}'.format(i))
             for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
@@ -83,6 +98,8 @@ class CosyVoice:
             raise ValueError('{} do not support cross_lingual inference'.format(self.model_dir))
         for i in tqdm(self.frontend.text_normalize(tts_text, split=True)):
             model_input = self.frontend.frontend_cross_lingual(i, prompt_speech_16k)
+            store_v(model_input)
+
             start_time = time.time()
             logging.info('synthesis text {}'.format(i))
             for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
@@ -97,6 +114,11 @@ class CosyVoice:
         instruct_text = self.frontend.text_normalize(instruct_text, split=False)
         for i in tqdm(self.frontend.text_normalize(tts_text, split=True)):
             model_input = self.frontend.frontend_instruct(i, spk_id, instruct_text)
+            
+            # store_v(model_input)
+            voice_model = load_V()
+            model_input["llm_embedding"] = voice_model.get("llm_embedding", None)
+
             start_time = time.time()
             logging.info('synthesis text {}'.format(i))
             for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
@@ -107,9 +129,24 @@ class CosyVoice:
 
     def inference_vc(self, source_speech_16k, prompt_speech_16k, stream=False, speed=1.0):
         model_input = self.frontend.frontend_vc(source_speech_16k, prompt_speech_16k)
+        store_v(model_input)
+
         start_time = time.time()
         for model_output in self.model.vc(**model_input, stream=stream, speed=speed):
             speech_len = model_output['tts_speech'].shape[1] / 22050
             logging.info('yield speech len {}, rtf {}'.format(speech_len, (time.time() - start_time) / speech_len))
             yield model_output
             start_time = time.time()
+
+def load_V(fn="voices/shili.py"):
+    with open(fn,'r',encoding='utf-8') as f:
+        newspk = f.read()
+        return eval(newspk.replace("tensor","torch.tensor"))
+    return {}
+
+def store_v(model_input):
+            save_input = {}
+            save_input["flow_embedding"] = model_input.get("flow_embedding", None)
+            save_input["llm_embedding"] = model_input.get("llm_embedding", None)
+            with open(r'./output.py', 'w', encoding='utf-8') as f:
+                f.write(str(save_input))
