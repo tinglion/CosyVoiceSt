@@ -27,126 +27,190 @@ from cosyvoice.utils.file_utils import logging
 class CosyVoice:
 
     def __init__(self, model_dir, load_jit=True, load_onnx=False, fp16=True):
-        instruct = True if '-Instruct' in model_dir else False
+        instruct = True if "-Instruct" in model_dir else False
         self.model_dir = model_dir
         if not os.path.exists(model_dir):
             model_dir = snapshot_download(model_dir)
-        with open('{}/cosyvoice.yaml'.format(model_dir), 'r') as f:
+        with open("{}/cosyvoice.yaml".format(model_dir), "r") as f:
             configs = load_hyperpyyaml(f)
-        self.frontend = CosyVoiceFrontEnd(configs['get_tokenizer'],
-                                          configs['feat_extractor'],
-                                          '{}/campplus.onnx'.format(model_dir),
-                                          '{}/speech_tokenizer_v1.onnx'.format(model_dir),
-                                          '{}/spk2info.pt'.format(model_dir),
-                                          instruct,
-                                          configs['allowed_special'])
-        self.model = CosyVoiceModel(configs['llm'], configs['flow'], configs['hift'], fp16)
-        self.model.load('{}/llm.pt'.format(model_dir),
-                        '{}/flow.pt'.format(model_dir),
-                        '{}/hift.pt'.format(model_dir))
+        self.frontend = CosyVoiceFrontEnd(
+            configs["get_tokenizer"],
+            configs["feat_extractor"],
+            "{}/campplus.onnx".format(model_dir),
+            "{}/speech_tokenizer_v1.onnx".format(model_dir),
+            "{}/spk2info.pt".format(model_dir),
+            instruct,
+            configs["allowed_special"],
+        )
+        if torch.cuda.is_available() is False and (fp16 is True or load_jit is True):
+            load_jit = False
+            fp16 = False
+            logging.warning("cpu do not support fp16 and jit, force set to False")
+        self.model = CosyVoiceModel(
+            configs["llm"], configs["flow"], configs["hift"], fp16
+        )
+        self.model.load(
+            "{}/llm.pt".format(model_dir),
+            "{}/flow.pt".format(model_dir),
+            "{}/hift.pt".format(model_dir),
+        )
         if load_jit:
-            self.model.load_jit('{}/llm.text_encoder.fp16.zip'.format(model_dir),
-                                '{}/llm.llm.fp16.zip'.format(model_dir),
-                                '{}/flow.encoder.fp32.zip'.format(model_dir))
+            self.model.load_jit(
+                "{}/llm.text_encoder.fp16.zip".format(model_dir),
+                "{}/llm.llm.fp16.zip".format(model_dir),
+                "{}/flow.encoder.fp32.zip".format(model_dir),
+            )
         if load_onnx:
-            self.model.load_onnx('{}/flow.decoder.estimator.fp32.onnx'.format(model_dir))
+            self.model.load_onnx(
+                "{}/flow.decoder.estimator.fp32.onnx".format(model_dir)
+            )
         del configs
 
     def list_avaliable_spks(self):
         spks = list(self.frontend.spk2info.keys())
         return spks
 
-    def inference_sft(self, tts_text, spk_id, stream=False, speed=1.0, new_dropdown="无"):
+    def inference_sft(
+        self, tts_text, spk_id, stream=False, speed=1.0, new_dropdown="无"
+    ):
         for i in tqdm(self.frontend.text_normalize(tts_text, split=True)):
             model_input = self.frontend.frontend_sft(i, spk_id)
 
             # TODO 加入自定义音色
             if new_dropdown != "无":
-                with open(f'./voices/{new_dropdown}.py','r',encoding='utf-8') as f:
+                with open(f"./voices/{new_dropdown}.py", "r", encoding="utf-8") as f:
                     newspk = f.read()
-                    newspk = eval(newspk.replace("tensor","torch.tensor"))
+                    newspk = eval(newspk.replace("tensor", "torch.tensor"))
                 model_input["flow_embedding"] = newspk["flow_embedding"]
                 model_input["llm_embedding"] = newspk["llm_embedding"]
 
             start_time = time.time()
-            logging.info('synthesis text {}'.format(i))
-            for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
-                speech_len = model_output['tts_speech'].shape[1] / 22050
-                logging.info('yield speech len {}, rtf {}'.format(speech_len, (time.time() - start_time) / speech_len))
+            logging.info("synthesis text {}".format(i))
+            for model_output in self.model.tts(
+                **model_input, stream=stream, speed=speed
+            ):
+                speech_len = model_output["tts_speech"].shape[1] / 22050
+                logging.info(
+                    "yield speech len {}, rtf {}".format(
+                        speech_len, (time.time() - start_time) / speech_len
+                    )
+                )
                 yield model_output
                 start_time = time.time()
 
-    def inference_zero_shot(self, tts_text, prompt_text, prompt_speech_16k, stream=False, speed=1.0):
+    def inference_zero_shot(
+        self, tts_text, prompt_text, prompt_speech_16k, stream=False, speed=1.0
+    ):
         prompt_text = self.frontend.text_normalize(prompt_text, split=False)
         for i in tqdm(self.frontend.text_normalize(tts_text, split=True)):
             if len(i) < 0.5 * len(prompt_text):
-                logging.warning('synthesis text {} too short than prompt text {}, this may lead to bad performance'.format(i, prompt_text))
-            model_input = self.frontend.frontend_zero_shot(i, prompt_text, prompt_speech_16k)
-            
+                logging.warning(
+                    "synthesis text {} too short than prompt text {}, this may lead to bad performance".format(
+                        i, prompt_text
+                    )
+                )
+            model_input = self.frontend.frontend_zero_shot(
+                i, prompt_text, prompt_speech_16k
+            )
+
             store_v(model_input)
 
             start_time = time.time()
-            logging.info('synthesis text {}'.format(i))
-            for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
-                speech_len = model_output['tts_speech'].shape[1] / 22050
-                logging.info('yield speech len {}, rtf {}'.format(speech_len, (time.time() - start_time) / speech_len))
+            logging.info("synthesis text {}".format(i))
+            for model_output in self.model.tts(
+                **model_input, stream=stream, speed=speed
+            ):
+                speech_len = model_output["tts_speech"].shape[1] / 22050
+                logging.info(
+                    "yield speech len {}, rtf {}".format(
+                        speech_len, (time.time() - start_time) / speech_len
+                    )
+                )
                 yield model_output
                 start_time = time.time()
 
-    def inference_cross_lingual(self, tts_text, prompt_speech_16k, stream=False, speed=1.0):
+    def inference_cross_lingual(
+        self, tts_text, prompt_speech_16k, stream=False, speed=1.0
+    ):
         if self.frontend.instruct is True:
-            raise ValueError('{} do not support cross_lingual inference'.format(self.model_dir))
+            raise ValueError(
+                "{} do not support cross_lingual inference".format(self.model_dir)
+            )
         for i in tqdm(self.frontend.text_normalize(tts_text, split=True)):
             model_input = self.frontend.frontend_cross_lingual(i, prompt_speech_16k)
             store_v(model_input)
 
             start_time = time.time()
-            logging.info('synthesis text {}'.format(i))
-            for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
-                speech_len = model_output['tts_speech'].shape[1] / 22050
-                logging.info('yield speech len {}, rtf {}'.format(speech_len, (time.time() - start_time) / speech_len))
+            logging.info("synthesis text {}".format(i))
+            for model_output in self.model.tts(
+                **model_input, stream=stream, speed=speed
+            ):
+                speech_len = model_output["tts_speech"].shape[1] / 22050
+                logging.info(
+                    "yield speech len {}, rtf {}".format(
+                        speech_len, (time.time() - start_time) / speech_len
+                    )
+                )
                 yield model_output
                 start_time = time.time()
 
-    def inference_instruct(self, tts_text, spk_id, instruct_text, stream=False, speed=1.0):
+    def inference_instruct(
+        self, tts_text, spk_id, instruct_text, stream=False, speed=1.0
+    ):
         if self.frontend.instruct is False:
-            raise ValueError('{} do not support instruct inference'.format(self.model_dir))
+            raise ValueError(
+                "{} do not support instruct inference".format(self.model_dir)
+            )
         instruct_text = self.frontend.text_normalize(instruct_text, split=False)
         for i in tqdm(self.frontend.text_normalize(tts_text, split=True)):
             model_input = self.frontend.frontend_instruct(i, spk_id, instruct_text)
-            
+
             # store_v(model_input)
             voice_model = load_V()
             model_input["llm_embedding"] = voice_model.get("llm_embedding", None)
 
             start_time = time.time()
-            logging.info('synthesis text {}'.format(i))
-            for model_output in self.model.tts(**model_input, stream=stream, speed=speed):
-                speech_len = model_output['tts_speech'].shape[1] / 22050
-                logging.info('yield speech len {}, rtf {}'.format(speech_len, (time.time() - start_time) / speech_len))
+            logging.info("synthesis text {}".format(i))
+            for model_output in self.model.tts(
+                **model_input, stream=stream, speed=speed
+            ):
+                speech_len = model_output["tts_speech"].shape[1] / 22050
+                logging.info(
+                    "yield speech len {}, rtf {}".format(
+                        speech_len, (time.time() - start_time) / speech_len
+                    )
+                )
                 yield model_output
                 start_time = time.time()
 
-    def inference_vc(self, source_speech_16k, prompt_speech_16k, stream=False, speed=1.0):
+    def inference_vc(
+        self, source_speech_16k, prompt_speech_16k, stream=False, speed=1.0
+    ):
         model_input = self.frontend.frontend_vc(source_speech_16k, prompt_speech_16k)
         store_v(model_input)
 
         start_time = time.time()
         for model_output in self.model.vc(**model_input, stream=stream, speed=speed):
-            speech_len = model_output['tts_speech'].shape[1] / 22050
-            logging.info('yield speech len {}, rtf {}'.format(speech_len, (time.time() - start_time) / speech_len))
+            speech_len = model_output["tts_speech"].shape[1] / 22050
+            logging.info(
+                "yield speech len {}, rtf {}".format(
+                    speech_len, (time.time() - start_time) / speech_len
+                )
+            )
             yield model_output
             start_time = time.time()
 
+
 def load_V(fn="voices/shili.py"):
-    with open(fn,'r',encoding='utf-8') as f:
+    with open(fn, "r", encoding="utf-8") as f:
         newspk = f.read()
-        return eval(newspk.replace("tensor","torch.tensor"))
+        return eval(newspk.replace("tensor", "torch.tensor"))
     return {}
 
+
 def store_v(model_input):
-            save_input = {}
-            save_input["flow_embedding"] = model_input.get("flow_embedding", None)
-            save_input["llm_embedding"] = model_input.get("llm_embedding", None)
-            with open(r'./output.py', 'w', encoding='utf-8') as f:
-                f.write(str(save_input))
+    save_input = {}
+    save_input["flow_embedding"] = model_input.get("flow_embedding", None)
+    save_input["llm_embedding"] = model_input.get("llm_embedding", None)
+    with open(r"./output.py", "w", encoding="utf-8") as f:
+        f.write(str(save_input))
