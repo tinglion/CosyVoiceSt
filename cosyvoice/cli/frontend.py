@@ -80,6 +80,7 @@ class CosyVoiceFrontEnd:
         return text_token, text_token_len
 
     def _extract_speech_token(self, speech):
+        # @st onnx 1500 by 4769
         assert speech.shape[1] / 16000 <= 30, 'do not support extract speech token for audio longer than 30s'
         feat = whisper.log_mel_spectrogram(speech, n_mels=128)
         speech_token = self.speech_tokenizer_session.run(None,

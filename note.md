@@ -8,6 +8,7 @@ cd CosyVoice
 # powershell: fsutil.exe file setCaseSensitiveInfo E:\programs\ubuntu\miniconda3\pkgs\ enable 
 conda create -n cosyvoice python=3.8 ncurse=6.3
 conda activate cosyvoice
+
 conda install -y -c conda-forge pynini==2.1.5
 conda install pytorch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 pytorch-cuda=11.8 -c pytorch -c nvidia  
 #或者CPU:  pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118

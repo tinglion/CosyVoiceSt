@@ -155,7 +155,7 @@ class CosyVoice:
                 start_time = time.time()
 
     def inference_instruct(
-        self, tts_text, spk_id, instruct_text, stream=False, speed=1.0
+        self, tts_text, spk_id, instruct_text, stream=False, speed=1.0, fn_voice="voices/shili.py"
     ):
         if self.frontend.instruct is False:
             raise ValueError(
@@ -166,7 +166,8 @@ class CosyVoice:
             model_input = self.frontend.frontend_instruct(i, spk_id, instruct_text)
 
             # store_v(model_input)
-            voice_model = load_V()
+            voice_model = load_V(fn_voice)
+            model_input["flow_embedding"] = voice_model.get("flow_embedding", None)
             model_input["llm_embedding"] = voice_model.get("llm_embedding", None)
 
             start_time = time.time()
