@@ -7,10 +7,7 @@ from pydantic import BaseModel
 
 from cosyvoice.cli.cosyvoice import CosyVoice
 from cosyvoice.utils.file_utils import load_wav
-
-model_path = "/fdata/models/cosyvoice"
-# model_path = "/data/models/CosyVoice"
-data_path = "./media"
+from conf import model_path,data_path
 
 cosyvoice_vc = CosyVoice(f"{model_path}/pretrained_models/CosyVoice-300M")
 print(cosyvoice_vc.list_avaliable_spks())
@@ -20,8 +17,9 @@ app = FastAPI()
 
 
 class VcReq(BaseModel):
-    src: str = "/projects/ady/tts/CosyVoice/media/e.wav"
-    voice_color_file: str = "/projects/ady/tts/CosyVoice/media/旁白-儿童-示范_30s.wav"
+    src: str = f"{data_path}/旁白-儿童-示范_30s.wav"
+    dst: str = f"{data_path}/旁白-儿童-示范_30s.brian.wav"
+    voice_color_file: str = f"{data_path}/11labs/brian.wav"
 
 
 @app.get("/")
@@ -46,10 +44,10 @@ async def vc(req: VcReq):
             stream=False,
         )
     ):
-        torchaudio.save(f"{req.src}_{i}.wav", j["tts_speech"], 22050)
-    print(time.time() - start_time)
+        torchaudio.save(f"{req.dst}", j["tts_speech"], 22050)
+    print(f"@sting {time.time() - start_time}")
     return dict(code=200, data=data)
 
 
-# 运行应用
-# uvicorn server_cosyvoice:app --reload --host 0.0.0.0 --port 16000
+# 运行应用 --reload 
+# nohup uvicorn server_cosyvoice:app --host 0.0.0.0 --port 16000 >>logs/info.log 2>&1 &
